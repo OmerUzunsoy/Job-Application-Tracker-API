@@ -1,0 +1,13 @@
+bin/
+obj/
+.vs/
+.vscode/
+*.user
+*.suo
+*.dbmdl
+*.jfm
+*.pfx
+*.publishsettings
+appsettings.Local.json
+TestResults/
+artifacts/
