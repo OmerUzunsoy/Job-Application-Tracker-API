@@ -1,5 +1,8 @@
+using JobApplicationTracker.Application.Common.Exceptions;
 using JobApplicationTracker.Application.Common.Interfaces;
+using JobApplicationTracker.Application.Dashboard;
 using JobApplicationTracker.Application.JobApplications;
+using JobApplicationTracker.Domain.Enums;
 using JobApplicationTracker.Domain.Entities;
 using Microsoft.EntityFrameworkCore;
 
@@ -7,21 +10,38 @@ namespace JobApplicationTracker.Persistence.Services;
 
 public class JobApplicationService(AppDbContext dbContext) : IJobApplicationService
 {
-    public async Task<IReadOnlyList<JobApplicationDto>> GetAllAsync(Guid userId, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<JobApplicationDto>> GetAllAsync(Guid userId, GetJobApplicationsQuery query, CancellationToken cancellationToken = default)
     {
-        var applications = await QueryUserApplications(userId)
-            .OrderByDescending(x => x.CreatedAt)
+        var applicationQuery = QueryUserApplications(userId);
+
+        if (query.Status.HasValue)
+        {
+            applicationQuery = applicationQuery.Where(x => x.Status == query.Status.Value);
+        }
+
+        if (!string.IsNullOrWhiteSpace(query.Search))
+        {
+            var search = query.Search.Trim().ToLower();
+            applicationQuery = applicationQuery.Where(x =>
+                x.CompanyName.ToLower().Contains(search) ||
+                x.Position.ToLower().Contains(search));
+        }
+
+        applicationQuery = ApplySorting(applicationQuery, query);
+
+        var applications = await applicationQuery
             .ToListAsync(cancellationToken);
 
         return applications.Select(x => x.ToDto()).ToList();
     }
 
-    public async Task<JobApplicationDto?> GetByIdAsync(Guid userId, Guid jobApplicationId, CancellationToken cancellationToken = default)
+    public async Task<JobApplicationDto> GetByIdAsync(Guid userId, Guid jobApplicationId, CancellationToken cancellationToken = default)
     {
         var application = await QueryUserApplications(userId)
             .FirstOrDefaultAsync(x => x.Id == jobApplicationId, cancellationToken);
 
-        return application?.ToDto();
+        return application?.ToDto()
+            ?? throw new NotFoundException("Job application was not found.");
     }
 
     public async Task<JobApplicationDto> CreateAsync(Guid userId, CreateJobApplicationRequest request, CancellationToken cancellationToken = default)
@@ -43,7 +63,7 @@ public class JobApplicationService(AppDbContext dbContext) : IJobApplicationServ
         return entity.ToDto();
     }
 
-    public async Task<JobApplicationDto?> UpdateAsync(Guid userId, Guid jobApplicationId, UpdateJobApplicationRequest request, CancellationToken cancellationToken = default)
+    public async Task<JobApplicationDto> UpdateAsync(Guid userId, Guid jobApplicationId, UpdateJobApplicationRequest request, CancellationToken cancellationToken = default)
     {
         var entity = await dbContext.JobApplications
             .Include(x => x.Notes)
@@ -52,7 +72,7 @@ public class JobApplicationService(AppDbContext dbContext) : IJobApplicationServ
 
         if (entity is null)
         {
-            return null;
+            throw new NotFoundException("Job application was not found.");
         }
 
         entity.CompanyName = request.CompanyName.Trim();
@@ -64,29 +84,28 @@ public class JobApplicationService(AppDbContext dbContext) : IJobApplicationServ
         return entity.ToDto();
     }
 
-    public async Task<bool> DeleteAsync(Guid userId, Guid jobApplicationId, CancellationToken cancellationToken = default)
+    public async Task DeleteAsync(Guid userId, Guid jobApplicationId, CancellationToken cancellationToken = default)
     {
         var entity = await dbContext.JobApplications
             .FirstOrDefaultAsync(x => x.Id == jobApplicationId && x.UserId == userId, cancellationToken);
 
         if (entity is null)
         {
-            return false;
+            throw new NotFoundException("Job application was not found.");
         }
 
         dbContext.JobApplications.Remove(entity);
         await dbContext.SaveChangesAsync(cancellationToken);
-        return true;
     }
 
-    public async Task<NoteDto?> AddNoteAsync(Guid userId, Guid jobApplicationId, CreateNoteRequest request, CancellationToken cancellationToken = default)
+    public async Task<NoteDto> AddNoteAsync(Guid userId, Guid jobApplicationId, CreateNoteRequest request, CancellationToken cancellationToken = default)
     {
         var exists = await dbContext.JobApplications
             .AnyAsync(x => x.Id == jobApplicationId && x.UserId == userId, cancellationToken);
 
         if (!exists)
         {
-            return null;
+            throw new NotFoundException("Job application was not found.");
         }
 
         var note = new Note
@@ -103,14 +122,14 @@ public class JobApplicationService(AppDbContext dbContext) : IJobApplicationServ
         return new NoteDto(note.Id, note.Content, note.CreatedAt);
     }
 
-    public async Task<InterviewDto?> AddInterviewAsync(Guid userId, Guid jobApplicationId, CreateInterviewRequest request, CancellationToken cancellationToken = default)
+    public async Task<InterviewDto> AddInterviewAsync(Guid userId, Guid jobApplicationId, CreateInterviewRequest request, CancellationToken cancellationToken = default)
     {
         var exists = await dbContext.JobApplications
             .AnyAsync(x => x.Id == jobApplicationId && x.UserId == userId, cancellationToken);
 
         if (!exists)
         {
-            return null;
+            throw new NotFoundException("Job application was not found.");
         }
 
         var interview = new Interview
@@ -128,6 +147,19 @@ public class JobApplicationService(AppDbContext dbContext) : IJobApplicationServ
         return new InterviewDto(interview.Id, interview.InterviewDate, interview.Type, interview.Result);
     }
 
+    public async Task<DashboardSummaryDto> GetDashboardAsync(Guid userId, CancellationToken cancellationToken = default)
+    {
+        var applications = dbContext.JobApplications
+            .AsNoTracking()
+            .Where(x => x.UserId == userId);
+
+        return new DashboardSummaryDto(
+            await applications.CountAsync(cancellationToken),
+            await applications.CountAsync(x => x.Status == ApplicationStatus.Interview, cancellationToken),
+            await applications.CountAsync(x => x.Status == ApplicationStatus.Offer, cancellationToken),
+            await applications.CountAsync(x => x.Status == ApplicationStatus.Rejected, cancellationToken));
+    }
+
     private IQueryable<JobApplication> QueryUserApplications(Guid userId)
     {
         return dbContext.JobApplications
@@ -135,5 +167,22 @@ public class JobApplicationService(AppDbContext dbContext) : IJobApplicationServ
             .Include(x => x.Notes)
             .Include(x => x.Interviews)
             .Where(x => x.UserId == userId);
+    }
+
+    private static IQueryable<JobApplication> ApplySorting(IQueryable<JobApplication> query, GetJobApplicationsQuery request)
+    {
+        var sortBy = request.SortBy?.Trim().ToLowerInvariant();
+
+        return (sortBy, request.Descending) switch
+        {
+            ("company", true) => query.OrderByDescending(x => x.CompanyName),
+            ("company", false) => query.OrderBy(x => x.CompanyName),
+            ("status", true) => query.OrderByDescending(x => x.Status),
+            ("status", false) => query.OrderBy(x => x.Status),
+            ("createdat", true) => query.OrderByDescending(x => x.CreatedAt),
+            ("createdat", false) => query.OrderBy(x => x.CreatedAt),
+            ("date", false) => query.OrderBy(x => x.AppliedDate),
+            _ => query.OrderByDescending(x => x.AppliedDate)
+        };
     }
 }

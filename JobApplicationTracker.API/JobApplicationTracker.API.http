@@ -1,6 +1,18 @@
 @JobApplicationTracker.API_HostAddress = http://localhost:5247
 
-GET {{JobApplicationTracker.API_HostAddress}}/weatherforecast/
+GET {{JobApplicationTracker.API_HostAddress}}/health
 Accept: application/json
+
+###
+
+GET {{JobApplicationTracker.API_HostAddress}}/api/dashboard
+Accept: application/json
+Authorization: Bearer {{token}}
+
+###
+
+GET {{JobApplicationTracker.API_HostAddress}}/api/jobs?status=Interview&search=google&sortBy=date&descending=true
+Accept: application/json
+Authorization: Bearer {{token}}
 
 ###
