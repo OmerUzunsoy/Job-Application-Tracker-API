@@ -1,32 +1,49 @@
 # Job-Application-Tracker-API
 
-ASP.NET Core Web API project for tracking job applications, interview steps, and notes with a layered architecture:
+Job Application Tracker API is a backend system designed to help users manage and track job applications, interviews, and hiring processes.
 
-- `JobApplicationTracker.API`
-- `JobApplicationTracker.Application`
-- `JobApplicationTracker.Domain`
-- `JobApplicationTracker.Persistence`
+Built with ASP.NET Core, EF Core, SQL Server, and JWT authentication.
 
 ## Features
 
-- JWT-based register and login
-- Job application CRUD
-- Application status tracking with enums
-- Per-application notes
-- Interview scheduling and result tracking
-- EF Core with SQL Server
+- JWT Authentication & Authorization
+- Job Application Management (CRUD)
+- Status Tracking (Applied, Interview, Offer, Rejected)
+- Notes & Interview Tracking
+- Filtering, Searching, Sorting
+- Clean Architecture (Layered)
+
+## Endpoint Examples
+
+```http
+POST /api/jobs
+GET /api/jobs
+GET /api/jobs?status=interview
+GET /api/jobs?search=google
+GET /api/jobs?sortBy=date&descending=true
+GET /api/dashboard
+GET /health
+```
+
+## Architecture
+
+- API -> Controllers
+- Application -> Business Logic
+- Domain -> Entities
+- Persistence -> Database
 
 ## Run
 
 1. Update the connection string in `JobApplicationTracker.API/appsettings.json`
-2. Run the database migration:
+2. Apply migrations:
 
 ```bash
 dotnet ef database update --project JobApplicationTracker.Persistence --startup-project JobApplicationTracker.API
 ```
 
-3. Start the API:
+3. Run the API:
 
 ```bash
-dotnet run --project JobApplicationTracker.API
+cd JobApplicationTracker.API
+dotnet run
 ```
